@@ -76,15 +76,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // Initial load
   useEffect(() => {
-    refreshContainers();
-  }, [refreshContainers]);
+    const initialize = async () => {
+      await refreshContainers();
+      // Check for updates immediately after loading containers
+      await checkForUpdates();
+    };
+    initialize();
+  }, [refreshContainers, checkForUpdates]);
   
   // Check for updates periodically
   useEffect(() => {
-    // Initial check
-    checkForUpdates();
-    
-    // Set up interval to check for updates
+    // Set up interval to check for updates periodically
     const intervalId = setInterval(() => {
       checkForUpdates();
     }, pollingTime * 1000);
