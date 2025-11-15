@@ -2,7 +2,6 @@
 
 import { createContext, useContext, useState, ReactNode, useCallback, useEffect } from 'react';
 import type { Container } from '@/lib/types';
-import { initialContainers } from '@/data/containers';
 import { useToast } from "@/hooks/use-toast";
 import { suggestUpdateCommand } from '@/ai/flows/suggest-update-command';
 import { summarizeUpdateLogs } from '@/ai/flows/summarize-update-logs';
@@ -16,16 +15,46 @@ interface AppContextType {
   pollingTime: number;
   setPollingTime: (time: number) => void;
   updateContainer: (containerId: string) => Promise<void>;
-  startContainer: (containerId: string) => void;
+  startContainer: (containerId: string) => Promise<void>;
+  refreshContainers: () => Promise<void>;
+  isLoading: boolean;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [containers, setContainers] = useState<Container[]>(initialContainers);
+  const [containers, setContainers] = useState<Container[]>([]);
   const [autoUpdate, setAutoUpdate] = useState(true);
   const [pollingTime, setPollingTime] = useState(60);
+  const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
+
+  // Fetch containers from the API
+  const refreshContainers = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      const response = await fetch('/api/containers?all=true');
+      if (!response.ok) {
+        throw new Error('Failed to fetch containers');
+      }
+      const data = await response.json();
+      setContainers(data.containers || []);
+    } catch (error) {
+      console.error('Error fetching containers:', error);
+      toast({
+        variant: "destructive",
+        title: 'Error',
+        description: 'Failed to fetch containers from Docker',
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  }, [toast]);
+
+  // Initial load
+  useEffect(() => {
+    refreshContainers();
+  }, [refreshContainers]);
 
   const updateContainer = useCallback(async (containerId: string) => {
     const containerToUpdate = containers.find(c => c.id === containerId);
@@ -35,6 +64,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     toast({ title: 'Starting Update...', description: `Updating container ${containerToUpdate.name}.` });
 
     try {
+      // Get update command from AI
       const { updateCommand } = await suggestUpdateCommand({
         containerName: containerToUpdate.name,
         currentImage: `${containerToUpdate.image}:${containerToUpdate.currentVersion}`,
@@ -43,19 +73,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
       
       setContainers(prev => prev.map(c => c.id === containerId ? { ...c, updateCommand } : c));
 
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      // Call the API to update the container
+      const response = await fetch(`/api/containers/${containerId}/update`, {
+        method: 'POST',
+      });
       
-      const isSuccess = Math.random() > 0.3;
+      const result = await response.json();
       
-      if (isSuccess) {
-        const logs = `Pulling from ${containerToUpdate.image}...\nDigest: sha256:abcde...\nStatus: Downloaded newer image for ${containerToUpdate.image}:${containerToUpdate.latestVersion}\nStopping container ${containerToUpdate.name}...\nRemoving container ${containerToUpdate.name}...\nCreating new container with image ${containerToUpdate.image}:${containerToUpdate.latestVersion}\nContainer ${containerToUpdate.name} started successfully.`;
-        setContainers(prev => prev.map(c => c.id === containerId ? { ...c, updateState: 'success' as const, currentVersion: c.latestVersion, logs } : c));
-        toast({ title: 'Update Successful', description: `Container ${containerToUpdate.name} updated to ${containerToUpdate.latestVersion}.` });
+      if (result.success) {
+        const logs = result.logs || 'Container updated successfully.';
+        setContainers(prev => prev.map(c => c.id === containerId ? { ...c, updateState: 'success' as const, logs } : c));
+        toast({ title: 'Update Successful', description: `Container ${containerToUpdate.name} updated successfully.` });
+        // Refresh container list after update
+        await refreshContainers();
       } else {
-        const errorLogs = `Error response from daemon: pull access denied for ${containerToUpdate.image}, repository does not exist or may require 'docker login': denied: requested access to the resource is denied`;
-        const { summary } = await summarizeUpdateLogs({ logs: errorLogs });
-        const fullLogs = `${updateCommand}\n\n${errorLogs}\n\n--- AI Summary ---\n${summary}`;
-        setContainers(prev => prev.map(c => c.id === containerId ? { ...c, updateState: 'error' as const, logs: fullLogs } : c));
+        const errorLogs = result.logs || result.error || 'Unknown error occurred';
+        // Try to get AI summary if available
+        try {
+          const { summary } = await summarizeUpdateLogs({ logs: errorLogs });
+          const fullLogs = `${updateCommand}\n\n${errorLogs}\n\n--- AI Summary ---\n${summary}`;
+          setContainers(prev => prev.map(c => c.id === containerId ? { ...c, updateState: 'error' as const, logs: fullLogs } : c));
+        } catch {
+          setContainers(prev => prev.map(c => c.id === containerId ? { ...c, updateState: 'error' as const, logs: `${updateCommand}\n\n${errorLogs}` } : c));
+        }
         toast({
           variant: "destructive",
           title: 'Update Failed',
@@ -72,22 +112,48 @@ export function AppProvider({ children }: { children: ReactNode }) {
           description: 'An unexpected error occurred.',
       });
     }
-  }, [containers, toast]);
+  }, [containers, toast, refreshContainers]);
 
-  const startContainer = useCallback((containerId: string) => {
-    setContainers(prev => prev.map(c => {
-      if (c.id === containerId) {
-        toast({ title: 'Container Started', description: `Container ${c.name} has been started.` });
-        return { ...c, status: 'running' as const };
+  const startContainer = useCallback(async (containerId: string) => {
+    const container = containers.find(c => c.id === containerId);
+    if (!container) return;
+
+    try {
+      const response = await fetch(`/api/containers/${containerId}/start`, {
+        method: 'POST',
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        toast({ title: 'Container Started', description: `Container ${container.name} has been started.` });
+        // Refresh container list after starting
+        await refreshContainers();
+      } else {
+        toast({
+          variant: "destructive",
+          title: 'Error',
+          description: `Failed to start ${container.name}.`,
+        });
       }
-      return c;
-    }));
-  }, [toast]);
+    } catch (error) {
+      console.error("Error starting container:", error);
+      toast({
+        variant: "destructive",
+        title: 'Error',
+        description: 'Failed to start container.',
+      });
+    }
+  }, [containers, toast, refreshContainers]);
   
+  // Auto-update polling
   useEffect(() => {
     if (!autoUpdate) return;
 
-    const intervalId = setInterval(() => {
+    const intervalId = setInterval(async () => {
+      // Refresh container list to check for updates
+      await refreshContainers();
+      
       const containersToUpdate = containers.filter(c => 
         c.status === 'running' && 
         c.currentVersion !== c.latestVersion && 
@@ -98,12 +164,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
           title: "Auto-Update Triggered",
           description: `Found ${containersToUpdate.length} container(s) to update.`
         })
-        containersToUpdate.forEach(c => updateContainer(c.id));
+        for (const container of containersToUpdate) {
+          await updateContainer(container.id);
+        }
       }
     }, pollingTime * 1000);
 
     return () => clearInterval(intervalId);
-  }, [autoUpdate, pollingTime, containers, updateContainer, toast]);
+  }, [autoUpdate, pollingTime, containers, updateContainer, toast, refreshContainers]);
 
 
   const value = {
@@ -115,6 +183,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setPollingTime,
     updateContainer,
     startContainer,
+    refreshContainers,
+    isLoading,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

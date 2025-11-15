@@ -30,6 +30,27 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  webpack: (config, { isServer }) => {
+    // Exclude dockerode and its dependencies from client-side bundle
+    if (!isServer) {
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        fs: false,
+        net: false,
+        tls: false,
+        dns: false,
+        child_process: false,
+      };
+    }
+    
+    // Mark dockerode as external for server-side
+    config.externals = config.externals || [];
+    if (isServer) {
+      config.externals.push('dockerode');
+    }
+    
+    return config;
+  },
 };
 
 export default nextConfig;

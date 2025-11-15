@@ -2,11 +2,12 @@
 
 import { useApp } from '@/contexts/app-context';
 import { CardContent } from '@/components/ui/card';
-import { Table, TableBody, TableHeader, TableRow, TableHead } from '@/components/ui/table';
+import { Table, TableBody, TableHeader, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { ContainerTableRow } from './container-table-row';
+import { Loader2 } from 'lucide-react';
 
 export function ContainerList() {
-  const { containers } = useApp();
+  const { containers, isLoading } = useApp();
 
   return (
     <CardContent className="p-0">
@@ -23,9 +24,26 @@ export function ContainerList() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {containers.map((container) => (
-              <ContainerTableRow key={container.id} container={container} />
-            ))}
+            {isLoading && containers.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={6} className="text-center py-8">
+                  <div className="flex items-center justify-center gap-2">
+                    <Loader2 className="h-6 w-6 animate-spin" />
+                    <span>Loading containers...</span>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ) : containers.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                  No containers found. Make sure Docker is running and you have containers.
+                </TableCell>
+              </TableRow>
+            ) : (
+              containers.map((container) => (
+                <ContainerTableRow key={container.id} container={container} />
+              ))
+            )}
           </TableBody>
         </Table>
       </div>
