@@ -20,31 +20,9 @@ export async function dockerContainerToContainer(
   const image = imageParts[0];
   const currentVersion = imageParts[1] || 'latest';
   
-  // Check for updates by comparing image IDs
-  let latestVersion = currentVersion;
-  let hasUpdate = false;
-  
-  try {
-    const imageName = inspectData.Config.Image;
-    const runningImageId = inspectData.Image;
-    
-    // Pull the latest image manifest quietly (doesn't download layers)
-    await docker.pull(imageName, {});
-    
-    // Get the latest image ID
-    const latestImage = docker.getImage(imageName);
-    const latestImageData = await latestImage.inspect();
-    const latestImageId = latestImageData.Id;
-    
-    // Compare image IDs
-    if (runningImageId !== latestImageId) {
-      hasUpdate = true;
-      latestVersion = `${currentVersion} (update available)`;
-    }
-  } catch (error) {
-    // If we can't check for updates, just use current version
-    console.error(`Error checking for updates for ${dockerContainer.Names[0]}:`, error);
-  }
+  // Initially set latestVersion to currentVersion
+  // Will be updated by periodic checks if needed
+  const latestVersion = currentVersion;
   
   return {
     id: dockerContainer.Id.substring(0, 12),
@@ -83,29 +61,7 @@ export async function getContainer(id: string): Promise<Container | null> {
     const imageParts = data.Config.Image.split(':');
     const image = imageParts[0];
     const currentVersion = imageParts[1] || 'latest';
-    
-    // Check for updates by comparing image IDs
-    let latestVersion = currentVersion;
-    try {
-      const imageName = data.Config.Image;
-      const runningImageId = data.Image;
-      
-      // Pull the latest image manifest quietly
-      await docker.pull(imageName, {});
-      
-      // Get the latest image ID
-      const latestImage = docker.getImage(imageName);
-      const latestImageData = await latestImage.inspect();
-      const latestImageId = latestImageData.Id;
-      
-      // Compare image IDs
-      if (runningImageId !== latestImageId) {
-        latestVersion = `${currentVersion} (update available)`;
-      }
-    } catch (error) {
-      // If we can't check for updates, just use current version
-      console.error(`Error checking for updates:`, error);
-    }
+    const latestVersion = currentVersion;
     
     return {
       id: data.Id.substring(0, 12),

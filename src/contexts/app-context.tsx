@@ -51,10 +51,48 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [toast]);
 
+  // Check for updates
+  const checkForUpdates = useCallback(async () => {
+    try {
+      const response = await fetch('/api/containers/check-all-updates');
+      if (!response.ok) {
+        throw new Error('Failed to check for updates');
+      }
+      const data = await response.json();
+      const updates = data.updates || {};
+      
+      // Update containers with latest version info
+      setContainers(prev => prev.map(c => {
+        if (updates[c.id]) {
+          return {
+            ...c,
+            latestVersion: updates[c.id].latestVersion,
+          };
+        }
+        return c;
+      }));
+    } catch (error) {
+      console.error('Error checking for updates:', error);
+    }
+  }, []);
+
   // Initial load
   useEffect(() => {
     refreshContainers();
   }, [refreshContainers]);
+  
+  // Check for updates periodically
+  useEffect(() => {
+    // Initial check
+    checkForUpdates();
+    
+    // Set up interval to check for updates
+    const intervalId = setInterval(() => {
+      checkForUpdates();
+    }, pollingTime * 1000);
+    
+    return () => clearInterval(intervalId);
+  }, [pollingTime, checkForUpdates]);
 
   const updateContainer = useCallback(async (containerId: string) => {
     const containerToUpdate = containers.find(c => c.id === containerId);
