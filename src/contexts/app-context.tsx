@@ -3,8 +3,6 @@
 import { createContext, useContext, useState, ReactNode, useCallback, useEffect } from 'react';
 import type { Container } from '@/lib/types';
 import { useToast } from "@/hooks/use-toast";
-import { suggestUpdateCommand } from '@/ai/flows/suggest-update-command';
-import { summarizeUpdateLogs } from '@/ai/flows/summarize-update-logs';
 
 
 interface AppContextType {
@@ -102,15 +100,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     toast({ title: 'Starting Update...', description: `Updating container ${containerToUpdate.name}.` });
 
     try {
-      // Get update command from AI
-      const { updateCommand } = await suggestUpdateCommand({
-        containerName: containerToUpdate.name,
-        currentImage: `${containerToUpdate.image}:${containerToUpdate.currentVersion}`,
-        latestImage: `${containerToUpdate.image}:${containerToUpdate.latestVersion}`,
-      });
-      
-      setContainers(prev => prev.map(c => c.id === containerId ? { ...c, updateCommand } : c));
-
       // Call the API to update the container
       const response = await fetch(`/api/containers/${containerId}/update`, {
         method: 'POST',
@@ -126,14 +115,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         await refreshContainers();
       } else {
         const errorLogs = result.logs || result.error || 'Unknown error occurred';
-        // Try to get AI summary if available
-        try {
-          const { summary } = await summarizeUpdateLogs({ logs: errorLogs });
-          const fullLogs = `${updateCommand}\n\n${errorLogs}\n\n--- AI Summary ---\n${summary}`;
-          setContainers(prev => prev.map(c => c.id === containerId ? { ...c, updateState: 'error' as const, logs: fullLogs } : c));
-        } catch {
-          setContainers(prev => prev.map(c => c.id === containerId ? { ...c, updateState: 'error' as const, logs: `${updateCommand}\n\n${errorLogs}` } : c));
-        }
+        setContainers(prev => prev.map(c => c.id === containerId ? { ...c, updateState: 'error' as const, logs: errorLogs } : c));
         toast({
           variant: "destructive",
           title: 'Update Failed',
