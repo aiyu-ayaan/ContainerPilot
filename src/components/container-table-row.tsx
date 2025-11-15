@@ -50,10 +50,10 @@ export function ContainerTableRow({ container }: { container: Container }) {
     <Collapsible asChild>
       <>
         <TableRow className="align-middle" data-state={logsOpen ? 'open' : 'closed'}>
-          <TableCell className="font-medium">{container.name}</TableCell>
-          <TableCell>{container.image}</TableCell>
-          <TableCell>{container.currentVersion}</TableCell>
-          <TableCell className="font-semibold text-primary">{container.latestVersion}</TableCell>
+          <TableCell className="font-medium max-w-[200px] truncate" title={container.name}>{container.name}</TableCell>
+          <TableCell className="max-w-[150px] truncate" title={container.image}>{container.image}</TableCell>
+          <TableCell className="max-w-[120px] truncate" title={container.currentVersion}>{container.currentVersion}</TableCell>
+          <TableCell className="font-semibold text-primary max-w-[120px] truncate" title={container.latestVersion}>{container.latestVersion}</TableCell>
           <TableCell>{renderStatusBadge()}</TableCell>
           <TableCell className="text-right">
             <div className="flex items-center justify-end gap-2">

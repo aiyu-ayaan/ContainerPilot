@@ -20,9 +20,31 @@ export async function dockerContainerToContainer(
   const image = imageParts[0];
   const currentVersion = imageParts[1] || 'latest';
   
-  // For now, we'll mark latest version as same as current
-  // In a real implementation, you'd query a registry
-  const latestVersion = currentVersion;
+  // Check for updates by comparing image IDs
+  let latestVersion = currentVersion;
+  let hasUpdate = false;
+  
+  try {
+    const imageName = inspectData.Config.Image;
+    const runningImageId = inspectData.Image;
+    
+    // Pull the latest image manifest quietly (doesn't download layers)
+    await docker.pull(imageName, {});
+    
+    // Get the latest image ID
+    const latestImage = docker.getImage(imageName);
+    const latestImageData = await latestImage.inspect();
+    const latestImageId = latestImageData.Id;
+    
+    // Compare image IDs
+    if (runningImageId !== latestImageId) {
+      hasUpdate = true;
+      latestVersion = `${currentVersion} (update available)`;
+    }
+  } catch (error) {
+    // If we can't check for updates, just use current version
+    console.error(`Error checking for updates for ${dockerContainer.Names[0]}:`, error);
+  }
   
   return {
     id: dockerContainer.Id.substring(0, 12),
@@ -61,7 +83,29 @@ export async function getContainer(id: string): Promise<Container | null> {
     const imageParts = data.Config.Image.split(':');
     const image = imageParts[0];
     const currentVersion = imageParts[1] || 'latest';
-    const latestVersion = currentVersion;
+    
+    // Check for updates by comparing image IDs
+    let latestVersion = currentVersion;
+    try {
+      const imageName = data.Config.Image;
+      const runningImageId = data.Image;
+      
+      // Pull the latest image manifest quietly
+      await docker.pull(imageName, {});
+      
+      // Get the latest image ID
+      const latestImage = docker.getImage(imageName);
+      const latestImageData = await latestImage.inspect();
+      const latestImageId = latestImageData.Id;
+      
+      // Compare image IDs
+      if (runningImageId !== latestImageId) {
+        latestVersion = `${currentVersion} (update available)`;
+      }
+    } catch (error) {
+      // If we can't check for updates, just use current version
+      console.error(`Error checking for updates:`, error);
+    }
     
     return {
       id: data.Id.substring(0, 12),
@@ -219,7 +263,7 @@ export async function updateContainer(
 }
 
 /**
- * Check for updates by comparing local and remote image digests
+ * Check for updates by comparing local and remote image IDs
  */
 export async function checkForUpdates(id: string): Promise<{
   hasUpdate: boolean;
@@ -230,36 +274,36 @@ export async function checkForUpdates(id: string): Promise<{
     const container = docker.getContainer(id);
     const data = await container.inspect();
     const imageName = data.Config.Image;
+    const currentVersion = imageName.split(':')[1] || 'latest';
     
-    // Get local image info
-    const localImage = docker.getImage(imageName);
-    const localData = await localImage.inspect();
+    // Get the running container's image ID
+    const runningImageId = data.Image;
     
-    // Pull latest image info (without downloading)
-    try {
-      const distribution = await docker.getImage(imageName).distribution();
-      
-      // Compare digests
-      const localDigest = localData.RepoDigests?.[0]?.split('@')[1] || '';
-      const remoteDigest = distribution.Descriptor?.digest || '';
-      
-      const hasUpdate = localDigest !== remoteDigest && remoteDigest !== '';
-      
-      return {
-        hasUpdate,
-        currentVersion: data.Config.Image.split(':')[1] || 'latest',
-        latestVersion: hasUpdate ? 'newer' : data.Config.Image.split(':')[1] || 'latest',
-      };
-    } catch (distError) {
-      // If we can't get distribution info, assume no update
-      return {
-        hasUpdate: false,
-        currentVersion: data.Config.Image.split(':')[1] || 'latest',
-        latestVersion: data.Config.Image.split(':')[1] || 'latest',
-      };
-    }
+    // Pull the latest image manifest (doesn't download layers)
+    await docker.pull(imageName, {});
+    
+    // Get the latest image ID
+    const latestImage = docker.getImage(imageName);
+    const latestImageData = await latestImage.inspect();
+    const latestImageId = latestImageData.Id;
+    
+    // Compare image IDs
+    const hasUpdate = runningImageId !== latestImageId;
+    
+    return {
+      hasUpdate,
+      currentVersion,
+      latestVersion: hasUpdate ? `${currentVersion} (update available)` : currentVersion,
+    };
   } catch (error) {
     console.error(`Error checking for updates for container ${id}:`, error);
-    throw error;
+    // If we can't check for updates, assume no update
+    const data = await docker.getContainer(id).inspect();
+    const currentVersion = data.Config.Image.split(':')[1] || 'latest';
+    return {
+      hasUpdate: false,
+      currentVersion,
+      latestVersion: currentVersion,
+    };
   }
 }
